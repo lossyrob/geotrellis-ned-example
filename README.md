@@ -1,4 +1,52 @@
-## Working with NED 1/3 ArcSec data on EMR
+# GeoTrellis on EMR tutorial
+
+This project serves as an example of how to work with the National Elevation Dataset on GeoTrellis and Spark on EMR.
+We will be
+
+## Introduction
+
+### What is the data?
+
+### What do we want to do with it?
+
+Paint awesome base maps!
+
+### ETL
+
+### What is EMR?
+
+## Getting started
+
+### Setting up the environment
+
+#### Building the project
+
+#### Accessing EMR
+
+#### Setting the EMR environment
+
+##### How many instances should I use?
+
+#### Starting the cluster
+
+#### Accessing the cluster UIs
+
+#### Exploring our data with Zeppelin
+
+## Painting our first basemap
+
+### Basics of ETL
+
+### Creating our source dataset
+
+###
+
+## Dynamic vs Static
+
+##
+
+
+
 
 ## Inspecting the data with Zeppelin
 

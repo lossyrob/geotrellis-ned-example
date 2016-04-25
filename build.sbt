@@ -1,4 +1,4 @@
-name := "ingest-elevation"
+name := "geotrellis-emr-tutorial"
 version := "0.1.0"
 scalaVersion := "2.10.5"
 crossScalaVersions := Seq("2.11.5", "2.10.5")
@@ -18,16 +18,13 @@ publishMavenStyle := true
 publishArtifact in Test := false
 pomIncludeRepository := { _ => false }
 
-resolvers += Resolver.bintrayRepo("azavea", "geotrellis")
-
 javaOptions += "-Xmx8G"
 
 fork in run := true
 
 libraryDependencies ++= Seq(
-  "com.azavea.geotrellis" %% "geotrellis-spark-etl" % "0.10.0-SNAPSHOT",
-  "com.azavea.geotrellis" %% "geotrellis-spark-testkit" % "0.10.0-SNAPSHOT",
-  "org.apache.spark" %% "spark-core" % "1.6.0",// % "provided",
+  "com.azavea.geotrellis" %% "geotrellis-spark-etl" % "0.10.0",
+  "org.apache.spark" %% "spark-core" % "1.6.0" % "provided",
   "org.scalatest"       %%  "scalatest"      % "2.2.0" % "test"
 )
 

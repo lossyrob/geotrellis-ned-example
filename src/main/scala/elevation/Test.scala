@@ -22,7 +22,7 @@ import org.apache.spark.SparkConf
 
 object Test {
   def main(args: Array[String]): Unit = {
-    hillshadeSpark()
+    hillshade()
   }
 
   def geojson(): Unit = {
@@ -50,7 +50,7 @@ object Test {
       val masked = reprojected.mask(mask.toPolygon)
 
       val hs = masked.hillshade(altitude = 60)
-      val hist = masked.histogramDouble
+      val hist = masked.histogram
       val cr = ColorRamps.BlueToOrange.stops(70)
       val cm = ColorMap.fromQuantileBreaks(hist, cr)
 
@@ -66,53 +66,13 @@ object Test {
   }
 
   def hillshade(): Unit = {
-//    val tile = SinglebandGeoTiff("/Users/rob/tmp/elevation-test/elevation-wm.tif")
     val gt = SinglebandGeoTiff("/Users/rob/data/elevation2.tif")
 
+//   val hs = gt.tile.hillshade(gt.rasterExtent.cellSize, altitude = 70, zFactor = 2.0)
    val hs = gt.tile.hillshade(gt.rasterExtent.cellSize, altitude = 60)
 
-    // val colorMap =
-    //   ColorMap(
-    //     Map(
-    //       0.1 -> RGBA(0,255,0,0x00).int,
-    //       0.3 -> RGBA(0,255,0,0x22).int,
-    //       0.5 -> RGBA(0,255,0,0x44).int,
-    //       1.5 -> RGBA(0,255,0,0x88).int,
-    //       2.5 -> RGBA(0,255,0,0xAA).int,
-    //       3.5 -> RGB(0,255,0).int,
-    //       7.5 -> RGB(63, 255 ,51).int,
-    //       11.5 -> RGB(102,255,102).int,
-    //       15.5 -> RGB(178, 255,102).int,
-    //       19.5 -> RGB(255,255,0).int,
-    //       23.5 -> RGB(255,255,51).int,
-    //       26.5 -> RGB(255,153, 51).int,
-    //       31.5 -> RGB(255,128,0).int,
-    //       35.0 -> RGB(255,51,51).int,
-    //       45.0 -> RGB(255,25,25).int,
-    //       65.0 -> RGB(255,5,5).int,
-    //       90.0 -> RGB(255,0,0).int
-    //     )
-    //   )
-
-
-    // GeoTiff(slope, tile.extent, tile.crs).write("/Users/rob/tmp/elevation-test/slope.tif")
-    // slope.renderPng(colorMap).write("/Users/rob/tmp/elevation-test/slope.png")
-
-//    GeoTiff(hs, tile.extent, tile.crs).write("/Users/rob/tmp/elevation-test/hs.tif")
-//    hs.convert(IntCellType).map(z => z << 24 | z << 16 | z << 8 | 0xFF).renderPng.write("/Users/rob/tmp/elevation-test/hs.png")
-//     hs
-//       .map { z =>
-// //        if(z < 100) {
-//       if(false) {
-//           z << 8 | z
-//         } else {
-//           z << 8 | 0xFF
-//         }
-//        }
-
-//    ColorRamps.BlueToOrange.colors.foreach { z => println(f"$z%02X") }
-    val cr = ColorRamps.BlueToOrange.stops(70)
-    val hInt = gt.tile.histogramDouble
+    val cr = ColorRamps.BlueToOrange.stops(100)
+    val hInt = gt.tile.histogramDouble(100)
 //    val hDouble = gt.tile.histogramDouble
 //    println("INT")
 //    hInt.quantileBreaks(cr.numStops).zip(cr.colors).foreach { case (d, z) => println(f"$d -> $z%02X") }
@@ -149,8 +109,9 @@ object Test {
       val (r, g, b, a) = rgba.unzipRGBA
       val hsbArr = java.awt.Color.RGBtoHSB(r, g, b, null)
       val (newR, newG, newB) = (java.awt.Color.HSBtoRGB(hsbArr(0), hsbArr(1), math.min(z, 160).toFloat / 160.0f) << 8).unzipRGB
+//      val (newR, newG, newB) = (java.awt.Color.HSBtoRGB(hsbArr(0), hsbArr(1), z.toFloat / 255.0f) << 8).unzipRGB
       RGBA(newR, newG, newB, a)
-    }.renderPng().write("/Users/rob/tmp/elevation-test/hs6.png")
+    }.renderPng().write("/Users/rob/tmp/elevation-test/hs8.png")
 
 //    hs.renderPng(GreyPngEncoding).write("/Users/rob/tmp/elevation-test/hs2.png")
 

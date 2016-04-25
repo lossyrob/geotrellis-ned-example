@@ -7,6 +7,8 @@ DATA_NAME=ned-19
 DST_CRS=EPSG:3857
 SOURCE_BUCKET=azavea-datahub
 SOURCE_PREFIX=raw/ned-13arcsec-geotiff/
+# SOURCE_BUCKET=osm-elevation
+# SOURCE_PREFIX=chunk/ned-13arcsec/
 TARGET=s3://geotrellis-test/elevation-ingest/
 
 PARTITION_ARG='partitionCount=1115,'

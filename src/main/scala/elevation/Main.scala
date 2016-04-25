@@ -42,11 +42,14 @@ object Ingest {
 
   def color(elevation: Tile, hillshade: Tile, cm: ColorMap): Tile =
     elevation.color(cm).combine(hillshade) { (rgba, z) =>
-      // Convert to HSB, replace the brightness with the hillshade value, convert back to RGBA
-      val (r, g, b, a) = rgba.unzipRGBA
-      val hsbArr = java.awt.Color.RGBtoHSB(r, g, b, null)
-      val (newR, newG, newB) = (java.awt.Color.HSBtoRGB(hsbArr(0), hsbArr(1), math.min(z, 160).toFloat / 160.0f) << 8).unzipRGB
-      RGBA(newR, newG, newB, a)
+      if(rgba == 0) { 0 }
+      else {
+        // Convert to HSB, replace the brightness with the hillshade value, convert back to RGBA
+        val (r, g, b, a) = rgba.unzipRGBA
+        val hsbArr = java.awt.Color.RGBtoHSB(r, g, b, null)
+        val (newR, newG, newB) = (java.awt.Color.HSBtoRGB(hsbArr(0), hsbArr(1), math.min(z, 160).toFloat / 160.0f) << 8).unzipRGB
+        RGBA(newR, newG, newB, a)
+      }
     }
 
   // http://fwarmerdam.blogspot.com/2010/01/hsvmergepy.html
@@ -61,10 +64,12 @@ object Ingest {
     }
 
   def main(args: Array[String]): Unit =
-    mainColorRampHillshade(args)
-//    mainNLCD()
+//    mainColorRampHillshade(args)
+    mainNLCD()
 
   // http://geotrellis-test.s3.amazonaws.com/elevation-ingest/{z}/{x}/{y}.png
+  // http://geotrellis-test.s3.amazonaws.com/nlcd-shade/{z}/{x}/{y}.png
+  // http://geotrellis-test.s3.amazonaws.com/nlcd-shade-2/{z}/{x}/{y}.png
 
   def mainColorRampHillshade(args: Array[String]): Unit = {
     implicit val sc = SparkUtils.createSparkContext("GeoTrellis ETL", new SparkConf(true))
@@ -81,7 +86,6 @@ object Ingest {
       val sourceTiles =
         etl.load[ProjectedExtent, Tile]
           .filter { case (key, value) => key.extent.intersects(maskPoly.envelope) }
-//          .sample(false, 0.20)
           .split(tileCols = 1024, tileRows = 1024)
           .repartition(partitioner.numPartitions)
 
@@ -89,25 +93,18 @@ object Ingest {
       val (zoom, unmaskedElevation) =
         etl.tile(sourceTiles)
 
-//      layerWriter.write(LayerId("elevation", zoom), unmaskedElevation, ZCurveIndexMethod)
-
-      println(s"UNMASKED META: ${unmaskedElevation.metadata}")
-
       val wmMaskPoly = maskPoly.reproject(LatLng, WebMercator)
       val elevation =
         unmaskedElevation
-          .filter()
-          .where(Intersects(wmMaskPoly))
-          .result
           .mask(wmMaskPoly)
 
       println(s"MASKED META: ${unmaskedElevation.metadata}")
 
       // Use the histogram to create a color map
-      val hist = elevation.histogramDouble
+      val hist = elevation.histogram(numBuckets = 100)
       val colorMap =
         ColorRamps.BlueToOrange
-          .stops(75)
+          .stops(100)
           .toColorMap(hist)
 
       println(s"THE HISTO BREAKS: ${hist.quantileBreaks(75).toSeq}")
@@ -115,8 +112,7 @@ object Ingest {
       val conf = etl.conf
       val path = "s3://geotrellis-test/elevation-ingest/{z}/{x}/{y}.png"
 
-//      Pyramid.upLevels(painted, conf.layoutScheme()(conf.crs(), conf.tileSize()), lowestZoom, BiCubic) { (layer, z) =>
-      Pyramid.levelStream(elevation, conf.layoutScheme()(conf.crs(), conf.tileSize()), lowestZoom, Bilinear)
+      Pyramid.levelStream(elevation, conf.layoutScheme()(conf.crs(), conf.tileSize()), zoom, Bilinear)
         .foreach { case (z, layer) =>
           val layerId = LayerId(conf.layerName(), z)
           val keyToPath = SaveToS3.spatialKeyToPath(layerId, path)
@@ -136,19 +132,17 @@ object Ingest {
     }
   }
 
-  def color(colors: Tile, elevation: Tile, hillshade: Tile, elevationSaturationMap: ColorMap): Tile =
+  def colorNlcd(colors: Tile, hillshade: Tile): Tile =
     colors.map { (col, row, rgba) =>
-      val e = elevation.getDouble(col, row)
       val shade = hillshade.get(col, row)
       // Convert to HSB, replace the brightness with the hillshade value,
       // modify the saturation based on the elevation, and convert back to RGBA.
       val (r, g, b, a) = rgba.unzipRGBA
       val hsbArr = RGBtoHSB(r, g, b, null)
       val hue = hsbArr(0)
-      val saturation: Float =
-        hsbArr(1) * ((50 + elevationSaturationMap.mapDouble(e)) / 100.0f)
+      val saturation = hsbArr(1)
       val brightness =
-        math.min(shade, 160).toFloat / 160.0f
+        math.min(shade, 180).toFloat / 180.0f
 
       HSBtoRGB(hue, saturation, brightness) << 8 | a
     }
@@ -156,9 +150,9 @@ object Ingest {
   def loadFromS3(bucket: String, prefix: String, partitionCount: Int)(implicit sc: SparkContext): RDD[(ProjectedExtent, Tile)] = {
     val conf = {
       val job = Job.getInstance(sc.hadoopConfiguration)
-      S3InputFormat.setBucket(job, "azavea-datahub")
-      S3InputFormat.setPrefix(job, "raw/nlcd/nlcd_2011_landcover_full_raster_30m")
-      S3InputFormat.setPartitionCount(job, 1000)
+      S3InputFormat.setBucket(job, bucket)
+      S3InputFormat.setPrefix(job, prefix)
+      S3InputFormat.setPartitionCount(job, partitionCount)
       job.getConfiguration
     }
 
@@ -178,74 +172,57 @@ object Ingest {
     val partitioner = new HashPartitioner(25000)
 
     try {
-      val filterPoly = continentalUS
-      val maskPoly = filterPoly.reproject(LatLng, WebMercator)
-
-      // Load & Tile NLCD
-      val rawNlcd =
-        loadFromS3("azavea-datahub", "raw/nlcd/nlcd_2011_landcover_full_raster_30m", 1000)
-
-      val (nZoom, unmaskedNlcd) =
-        tile(rawNlcd, 512, NearestNeighbor, partitioner)
-
-      val nlcd =
-        unmaskedNlcd.mask(maskPoly)
-
-      println(s"NLCD: ${nlcd.metadata}")
-
       // Load & Tile Elevation
       val rawElevation =
         loadFromS3("azavea-datahub", "raw/ned-13arcsec-geotiff", 1115)
-          .filter { case (key, value) => key.extent.intersects(filterPoly.envelope) }
+          .filter { case (key, value) => key.extent.intersects(continentalUS.envelope) }
           .split(tileCols = 1024, tileRows = 1024)
-          .repartition(partitioner.numPartitions)
+          .repartition(25000)
 
-      val (eZoom, unmaskedElevation) =
+      val (zoom, elevation) =
         tile(rawElevation, 512, Bilinear, partitioner)
-
-      val elevation =
-        unmaskedElevation.mask(maskPoly)
 
       println(s"ELEV: ${elevation.metadata}")
 
-      require(eZoom ==nZoom, "Elevation zoom and NLCD zoom aren't the same apparently.")
+      // Load & Tile NLCD
+      val rawNlcd =
+        loadFromS3("azavea-datahub", "raw/nlcd/nlcd_2011_landcover_full_raster_30m", 4029)
 
-      // Calculate hillshade
-      val hillshade =
-        elevation.hillshade(altitude = 60)
+      val (nZoom, tiledNlcd) =
+        tile(rawNlcd, 512, NearestNeighbor, partitioner)
 
-      // Create "color ramp" that will render elevations
-      val elevationSaturationMap =
-        ColorMap(
-          elevation
-            .histogramDouble
-            .quantileBreaks(50)
-            .zipWithIndex
-            .map { case (q, i) => (q, 50 - i) }
-            .toMap
-        ).withFallbackColor(1)
+      // NLCD will tile to zoom 12, so resample to zoom 13 to match elevation
+      val nlcd =
+        tiledNlcd
+          .resampleToZoom(nZoom, zoom, NearestNeighbor)
 
+      println(s"NLCD: ${nlcd.metadata}")
 
       // NLCD pyramid stream
       val nlcdLevels =
-        Pyramid.levelStream(nlcd, targetLayoutScheme, nZoom, NearestNeighbor)
+        Pyramid.levelStream(nlcd, targetLayoutScheme, zoom, NearestNeighbor)
 
       // Elevation pyramid stream
       val elevationLevels =
-        Pyramid.levelStream(elevation, targetLayoutScheme, eZoom, Bilinear)
+        Pyramid.levelStream(elevation, targetLayoutScheme, zoom, Bilinear)
+
+      // Create the color function based on the histgram of elevation values.
+      val colorFunc =
+        NLCD.colorFunc(elevation.histogram(numBuckets = 200))
 
       nlcdLevels
         .zip(elevationLevels)
         .foreach { case ((z, nlcdLayer), (_, elevationLayer)) =>
-          val layerId = LayerId("nlcd-shade", z)
+          val layerId = LayerId("nlcd-shade-2", z)
           val keyToPath = SaveToS3.spatialKeyToPath(layerId, "s3://geotrellis-test/{name}/{z}/{x}/{y}.png")
 
           nlcdLayer
-            .color(NLCD.colorMap)
+            .convert(IntConstantNoDataCellType)
             .join(elevationLayer)
+            .mapValues { case (nlcdTile, elevationTile) => colorFunc(nlcdTile, elevationTile) }
             .join(elevationLayer.hillshade(altitude = 60))
-            .mapValues { case ((coloredNlcdTile, elevationTile), hillshadeTile) =>
-              color(coloredNlcdTile, elevationTile, hillshadeTile, elevationSaturationMap).renderPng().bytes
+            .mapValues { case (coloredNlcdTile, hillshadeTile) =>
+              colorNlcd(coloredNlcdTile, hillshadeTile).renderPng().bytes
             }
             .saveToS3(keyToPath, { putObject =>
               putObject.withCannedAcl(CannedAccessControlList.PublicRead)
